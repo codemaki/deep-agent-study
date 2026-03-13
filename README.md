@@ -30,6 +30,55 @@ deep-agent-study/
 | `FilesystemMiddleware` | `ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep` |
 | `SubAgentMiddleware` | `task` — 하위 에이전트 생성 |
 
+> **`TodoListMiddleware` 주의사항**
+>
+> `write_todos`를 호출할지 말지는 **전적으로 LLM이 판단**한다. 미들웨어는 도구와 지침(시스템 프롬프트)을 제공할 뿐이다.
+>
+> LLM의 판단 흐름:
+> - 단순 쿼리 → `write_todos` 생략, 바로 답변
+> - 복잡하지만 위임 가능 → `SubAgentMiddleware`의 `task`로 하위 에이전트에 위임 → 메인 에이전트 입장에서 1단계로 끝나므로 `write_todos` 생략
+> - 복잡하고 직접 처리해야 하는 경우 → `write_todos` 호출
+>
+> 따라서 복잡한 쿼리라도 `SubAgentMiddleware`가 먼저 `task`로 가로채면 `write_todos`는 동작하지 않는다.
+> `write_todos`를 확실히 발동시키려면 쿼리에 **"subagent나 task 도구 없이 직접 단계별로 처리해줘"** 를 명시하면 된다.
+>
+> **`FilesystemMiddleware` 주의사항**
+>
+> `ls`, `read_file`, `write_file` 등은 **실제 OS 파일시스템이 아닌 인메모리 가상 파일시스템**을 대상으로 동작한다(`StateBackend`). 로컬에 파일이 있어도 에이전트에게는 보이지 않으며, 에이전트가 저장한 파일도 세션이 끝나면 사라진다.
+
+### tool_call 병렬 처리 vs SubAgent(`task`) 호출
+
+헷갈리기 쉬운 두 개념을 구분해두자.
+
+**tool_call 병렬 처리** — LLM이 한 번의 응답에서 여러 도구를 동시에 호출하는 것. 어떤 도구든 해당된다.
+
+```
+🔧 tool_call: write_todos   ←┐
+🔧 tool_call: ls            ←┘ 동시 호출 (일반 도구 병렬)
+```
+
+**SubAgent(`task`) 호출** — tool_call 병렬 처리의 한 종류. 단지 호출하는 도구가 `task`인 것.
+
+```
+🔧 tool_call: task args={...Google...}    ←┐
+🔧 tool_call: task args={...DuckDuckGo...} ←┘ 동시 호출 (subagent 병렬)
+```
+
+**그렇다면 언제 일반 tool_call이고 언제 SubAgent인가?**
+
+| 구분 | 기준 | 예시 |
+|---|---|---|
+| 일반 tool_call | 한 번 호출로 즉시 결과가 나오는 단순·원자적 작업 | `ls`, `read_file`, `write_todos` |
+| SubAgent(`task`) | 위임한 작업 자체가 내부적으로 추론 → 도구 호출 → 재추론의 루프가 필요한 작업 | "Google에서 LangGraph 검색해서 요약해줘" |
+
+SubAgent는 메인 에이전트와 **완전히 독립된 별도의 에이전트 인스턴스**가 생성되어 자기만의 추론 루프를 돈다. `task`를 4개 병렬로 던지면 4개의 에이전트가 동시에 각자의 루프를 실행한다.
+
+**정리**
+- SubAgent 병렬 호출 → tool_call 병렬 처리 **맞음**
+- tool_call 병렬 처리 → SubAgent 호출 **아닐 수도 있음**
+
+---
+
 ### 에이전트 내부를 보는 3가지 방법
 
 #### 1. 디버그 모드 (가장 빠름)
