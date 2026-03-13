@@ -1,0 +1,18 @@
+services:
+  deep-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: deep-agent-study:latest
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Pass a query via: docker compose run deep-agent "your question here"
+    # Default query is used when no argument is given (see main.py)
+    stdin_open: true
+    tty: true
+    volumes:
+      # Mount source for live-reload during development
+      - ./src:/app/src:ro
+      - ./main.py:/app/main.py:ro
